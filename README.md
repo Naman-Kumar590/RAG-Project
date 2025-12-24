@@ -82,9 +82,9 @@ python history_aware_generation.py
 
 ---
 
-## � Documentation
-- `docs/multi_modal_rag.md` — Guide for the multimodal RAG notebook (`multi_model_rag.ipynb`) including how to ingest PDFs with images/tables, summarisation fallbacks, and multimodal answer generation.
-- `docs/history_aware_generation.md` — Guide for `history_aware_generation.py` that explains conversation rewriting, chat loop, and customization.
-
+## 📚 Documentation
+- `Docs/multi_modal_rag.md` — Guide for the multimodal RAG notebook (`multi_model_rag.ipynb`): ingest PDFs (text, images, tables), chunking and summarisation fallbacks, and multimodal generation examples.
+- `Docs/history_aware_generation.md` — Guide for `history_aware_generation.py`: conversation rewriting, retriever usage, and running the interactive chat loop.
+- `multi_model_rag.ipynb` — Notebook demo for multimodal RAG (PDF partitioning, chunking, summarisation, vector store creation, and generation).
 
 © RAG Project
