@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-core
+langchain-google-genai
+langchain-chroma
+chromadb
+google-generativeai
+python-dotenv
+unstructured
+networkx
+openpyxl
+tiktoken

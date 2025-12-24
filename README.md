@@ -82,24 +82,9 @@ python history_aware_generation.py
 
 ---
 
-## 🛠 Troubleshooting
-- "No documents found": confirm text files exist in `Docs/` and are UTF-8 encoded.
-- Authentication errors: confirm `.env` contains valid Google Generative AI credentials and that required environment variables are loaded.
-- If embeddings or model names change, update the strings used in the scripts.
+## � Documentation
+- `docs/multi_modal_rag.md` — Guide for the multimodal RAG notebook (`multi_model_rag.ipynb`) including how to ingest PDFs with images/tables, summarisation fallbacks, and multimodal answer generation.
+- `docs/history_aware_generation.md` — Guide for `history_aware_generation.py` that explains conversation rewriting, chat loop, and customization.
 
----
-
-## ✅ Next steps / Ideas
-- Add a `requirements.txt` and CI checks.
-- Add unit/integration tests and example queries for reproducibility.
-- Add a small `Makefile` or task runner to automate ingestion and tests.
-
----
-
-If you'd like, I can also:
-- Add a `requirements.txt` with pinned versions.
-- Commit the README to git and create a branch + PR.
-
----
 
 © RAG Project
