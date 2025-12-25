@@ -71,6 +71,21 @@ python retrieval_pipeline.py
 python history_aware_generation.py
 ```
 
+or in the notebook demo:
+
+- Open `multi_model_rag.ipynb`, run the ingestion cells to build `db`, then run the new "History-aware RAG chat" cell which demonstrates `history_rag.ask_with_history` and a small chat loop.
+
+Programmatically you can also use the new module:
+
+```python
+from langchain_google_genai import ChatGoogleGenerativeAI
+from history_rag import ask_with_history
+
+model = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
+chat_history = []
+answer, chat_history = ask_with_history(model, db, chat_history, "What are the main components of the Transformer?", k=3)
+print(answer)
+```
 ---
 
 ## 📌 Implementation Notes
