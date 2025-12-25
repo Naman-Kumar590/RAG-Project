@@ -1,12 +1,9 @@
+streamlit
 langchain
 langchain-community
-langchain-core
-langchain-google-genai
 langchain-chroma
-chromadb
-google-generativeai
+langchain-groq
+langchain-google-genai
+rank_bm25
 python-dotenv
-unstructured
-networkx
-openpyxl
-tiktoken
+chromadb
