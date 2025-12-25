@@ -1,105 +1,75 @@
-# RAG Project
+# RAG Project — Multimodal Hybrid RAG 🤖
 
-✅ **Repository**: A small Retrieval-Augmented Generation (RAG) demo using Google Generative AI embeddings and Chroma for vector storage.
-
----
-
-## 🔧 Overview
-This project demonstrates a simple RAG pipeline: ingest text files into a Chroma vector store, retrieve relevant chunks for a query, and generate answers using a Google Generative AI chat model (Gemini family).
+A compact Retrieval-Augmented Generation (RAG) demo using Google Generative AI embeddings, Chroma for vector storage, and a Groq-powered chat model. This repo includes an ingestion pipeline, retrieval utilities, and a Streamlit app for interactive querying of ingested documents.
 
 ---
 
-## 📁 Project Structure
-- `ingestion_pipeline.py` — Load `.txt` files from `Docs/`, split into chunks, and create/persist a Chroma vector store in `db/chroma_db`.
-- `retrieval_pipeline.py` — Example script to query the vector store and generate an answer with the chat model.
-- `history_aware_generation.py` — A simple chat loop that maintains conversation history, rewrites follow-ups to standalone questions, retrieves relevant documents, and returns an answer.
-- `Docs/` — Source text documents used for ingestion (e.g., `Google.txt`, `Microsoft.txt`, ...).
-- `db/chroma_db/` — Persisted Chroma database files produced by the ingestion step.
+## Quick Start (3–5 minutes) ✅
+1. Clone and enter the repo:
 
----
+```bash
+git clone <repo-url> && cd "RAG Project"
+```
 
-## ⚙️ Prerequisites
-- Python 3.8+ (recommended)
-- Create a virtual environment (optional but recommended):
+2. (Optional) Create a Python virtual environment and activate it:
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
+source .venv/bin/activate  # macOS / Linux
 ```
 
-- Install required packages (example):
+3. Install dependencies:
 
 ```bash
-pip install python-dotenv langchain_chroma langchain_google_genai langchain_core langchain_community langchain_text_splitters chromadb
+pip install -r requirements.txt
+# or
+pip install python-dotenv chromadb langchain_chroma langchain_google_genai streamlit
 ```
 
-> Tip: If the project includes a `requirements.txt`, prefer `pip install -r requirements.txt`.
+4. Add required env vars in a `.env` file at the repo root:
+
+```env
+# required
+GROQ_API_KEY=your_groq_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+```
+
+5. Build the vector DB (ingest documents) and run the app:
+
+```bash
+python ingestion_pipeline.py       # creates/updates a Chroma DB (dbv2/chroma_db)
+streamlit run app.py               # open the interactive RAG UI at http://localhost:8501
+```
 
 ---
 
-## 🔑 Setup
-1. Create a `.env` file in the project root with your Google Generative AI credentials (the exact variables depend on your Google credentials setup). Example:
-
-```
-# .env (example)
-GOOGLE_API_KEY=your_api_key_here
-```
-
-2. Make sure `Docs/` contains the text files you want to index (the repository already has sample files).
+## Minimal Usage
+- Ask document-aware questions in the Streamlit UI (e.g., "Show me Figure 1", "Summarize the Tesla doc").
+- Command-line utilities:
+  - `python retrieval_pipeline.py` — quick single-query demo
+  - `python history_aware_generation.py` — conversation/chat loop with follow-up rewriting
 
 ---
 
-## ▶️ Usage
-1. Ingest documents and build the vector store:
-
-```bash
-python ingestion_pipeline.py
-```
-
-2. Run a single-query retrieval + generation demo:
-
-```bash
-python retrieval_pipeline.py
-```
-
-3. Start the interactive chat with history-aware question rewriting:
-
-```bash
-python history_aware_generation.py
-```
-
-or in the notebook demo:
-
-- Open `multi_model_rag.ipynb`, run the ingestion cells to build `db`, then run the new "History-aware RAG chat" cell which demonstrates `history_rag.ask_with_history` and a small chat loop.
-
-Programmatically you can also use the new module:
-
-```python
-from langchain_google_genai import ChatGoogleGenerativeAI
-from history_rag import ask_with_history
-
-model = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
-chat_history = []
-answer, chat_history = ask_with_history(model, db, chat_history, "What are the main components of the Transformer?", k=3)
-print(answer)
-```
----
-
-## 📌 Implementation Notes
-- Embeddings: `GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")` (see code in `ingestion_pipeline.py`).
-- Chat model: `ChatGoogleGenerativeAI(model="gemini-flash-latest")` (used in `retrieval_pipeline.py` and `history_aware_generation.py`).
-- The ingestion pipeline batches document uploads (default batch size 15) and pauses between batches to respect API limits.
-- `ingestion_pipeline.py` raises helpful errors if `Docs/` is missing or empty.
-- `history_aware_generation.py` tries to rewrite follow-up questions to be standalone for better retrieval.
+## Troubleshooting (quick tips) ⚠️
+- "Missing API Keys" error: ensure `GROQ_API_KEY` and `GOOGLE_API_KEY` are in `.env` and loaded.
+- "Database not found" error: run `python ingestion_pipeline.py` to recreate `dbv2/chroma_db`.
+- Rate limits: ingestion respects pauses; retry or increase batch delays if you see API limit errors.
 
 ---
 
-## 📚 Documentation
-- `Docs/multi_modal_rag.md` — Guide for the multimodal RAG notebook (`multi_model_rag.ipynb`): ingest PDFs (text, images, tables), chunking and summarisation fallbacks, and multimodal generation examples.
-- `Docs/history_aware_generation.md` — Guide for `history_aware_generation.py`: conversation rewriting, retriever usage, and running the interactive chat loop.
-- `multi_model_rag.ipynb` — Notebook demo for multimodal RAG (PDF partitioning, chunking, summarisation, vector store creation, and generation).
+## Key Files
+- `app.py` — Streamlit UI (uses `dbv2/chroma_db` by default)
+- `ingestion_pipeline.py` — ingest docs from `Docs/` into Chroma
+- `retrieval_pipeline.py` — example single-query retrieval/generation
+- `history_aware_generation.py` — chat loop with history-aware query rewriting
+- `Docs/` — sample text documents (used for ingestion)
 
-© RAG Project
+---
+
+## License & Contributing
+Add a `LICENSE` file if you want to open-source this project. Contributions and issues are welcome — open a PR or issue describing the change.
+
+---
+
+Enjoy! 🎯 — Run the ingestion step to build your DB, then ask questions via the Streamlit app or the example scripts.
