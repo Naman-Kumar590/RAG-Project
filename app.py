@@ -2,10 +2,14 @@ import streamlit as st
 import os
 import time
 import json
-import base64  
+import base64
+import tempfile
+import shutil
 from dotenv import load_dotenv
 
-# Core Imports
+# Loaders & Processing
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
@@ -14,168 +18,187 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.documents import Document
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="RAG Chat", page_icon="🤖")
+st.set_page_config(page_title="Custom RAG Chat", page_icon="📂", layout="wide")
 load_dotenv()
 
-DB_PATH = "dbv2/chroma_db"
+# We use a temporary directory for the vector DB so it resets per session/upload
+if "temp_db_path" not in st.session_state:
+    st.session_state.temp_db_path = tempfile.mkdtemp()
+
 MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
 
-# --- CACHED RESOURCE LOADING ---
+# --- SIDEBAR: FILE UPLOAD ---
+with st.sidebar:
+    st.title(" Your Documents")
+    uploaded_files = st.file_uploader(
+        "Upload PDF, DOCX, or TXT", 
+        type=["pdf", "docx", "txt"], 
+        accept_multiple_files=True
+    )
+    process_btn = st.button("Process", type="primary")
+    st.info("Upload files and click 'Process' to start chatting.")
+
+# --- CACHED MODEL LOADING (Static) ---
 @st.cache_resource
-def initialize_system():
-    # 1. Check Keys
+def load_models():
     if not os.getenv("GROQ_API_KEY") or not os.getenv("GOOGLE_API_KEY"):
         st.error(" Missing API Keys in .env file!")
         st.stop()
-        
-    # 2. Load Vector DB
+    
     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-    if not os.path.exists(DB_PATH):
-        st.error(f" Database not found at {DB_PATH}")
-        st.stop()
-        
-    db = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
+    chat_model = ChatGroq(model=MODEL_NAME, temperature=0)
+    return embeddings, chat_model
+
+embeddings, chat_model = load_models()
+
+# --- DOCUMENT PROCESSING FUNCTION ---
+def process_documents(uploaded_files):
+    """
+    Reads uploaded files, chunks them, and rebuilds the Vector + BM25 DB.
+    """
+    docs = []
     
-    # 3. Build BM25 Index
-    try:
-        existing_data = db.get()
-        docs_for_bm25 = [
-            Document(page_content=txt, metadata=meta)
-            for txt, meta in zip(existing_data['documents'], existing_data['metadatas'])
-        ]
-        bm25_retriever = BM25Retriever.from_documents(docs_for_bm25)
+    # 1. Read Files
+    with st.status(" Processing files...", expanded=True) as status:
+        for file in uploaded_files:
+            st.write(f" Reading {file.name}...")
+            
+            # Save to temp file to use standard loaders
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file.name.split('.')[-1]}") as tmp_file:
+                tmp_file.write(file.read())
+                tmp_path = tmp_file.name
+            
+            # Load based on type
+            try:
+                if file.name.endswith(".pdf"):
+                    loader = PyPDFLoader(tmp_path)
+                elif file.name.endswith(".docx"):
+                    loader = Docx2txtLoader(tmp_path)
+                elif file.name.endswith(".txt"):
+                    loader = TextLoader(tmp_path)
+                else:
+                    continue
+                
+                # Extract text
+                loaded_docs = loader.load()
+                docs.extend(loaded_docs)
+            except Exception as e:
+                st.error(f"Error loading {file.name}: {e}")
+            finally:
+                os.remove(tmp_path) # Clean up temp file
+
+        # 2. Split Text
+        st.write(f" Splitting {len(docs)} documents into chunks...")
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        splits = text_splitter.split_documents(docs)
+
+        # 3. Build Vector DB (Chroma)
+        st.write("Building Vector Database...")
+        # Clear old DB if exists
+        if os.path.exists(st.session_state.temp_db_path):
+            shutil.rmtree(st.session_state.temp_db_path)
+        
+        vector_db = Chroma.from_documents(
+            documents=splits, 
+            embedding=embeddings, 
+            persist_directory=st.session_state.temp_db_path
+        )
+
+        # 4. Build BM25 Index
+        st.write(" Building Keyword Index (BM25)...")
+        bm25_retriever = BM25Retriever.from_documents(splits)
         bm25_retriever.k = 5
-    except Exception as e:
-        st.error(f" BM25 Build Failed: {e}")
-        st.stop()
+
+        status.update(label=" Ready to Chat!", state="complete", expanded=False)
         
-    # 4. Initialize Chat Model
-    model = ChatGroq(model=MODEL_NAME, temperature=0)
-    
-    return db, bm25_retriever, model
+        return vector_db, bm25_retriever
 
-db, bm25_retriever, model = initialize_system()
+# --- STATE MANAGEMENT ---
+if process_btn and uploaded_files:
+    db, bm25 = process_documents(uploaded_files)
+    st.session_state.vector_db = db
+    st.session_state.bm25_retriever = bm25
+    st.session_state.messages = [] # Reset chat on new upload
 
-# --- HELPER FUNCTIONS ---
-
+# --- HELPER FUNCTIONS (Same as before) ---
 def reciprocal_rank_fusion(vector_docs, bm25_docs, k=60):
     fused_scores = {}
     doc_map = {}
+    for rank, doc in enumerate(vector_docs):
+        doc_key = doc.page_content[:200]
+        doc_map[doc_key] = doc
+        fused_scores[doc_key] = fused_scores.get(doc_key, 0) + (1 / (rank + k))
     
-    def update_score(docs, weight=1.0):
-        for rank, doc in enumerate(docs):
-            doc_key = doc.page_content[:200]
-            if doc_key not in doc_map: doc_map[doc_key] = doc
-            score = 1 / (rank + k)
-            fused_scores[doc_key] = fused_scores.get(doc_key, 0) + (score * weight)
-
-    update_score(vector_docs)
-    update_score(bm25_docs)
-    
+    for rank, doc in enumerate(bm25_docs):
+        doc_key = doc.page_content[:200]
+        if doc_key not in doc_map: doc_map[doc_key] = doc
+        fused_scores[doc_key] = fused_scores.get(doc_key, 0) + (1 / (rank + k))
+        
     sorted_docs = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
     return [doc_map[key] for key, score in sorted_docs[:3]]
-
-def safe_api_call(func, *args, **kwargs):
-    for i in range(3):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            if "429" in str(e): time.sleep(1)
-            else: raise e
-    return None
 
 def rewrite_query(history, question):
     if not history: return question
     msg = [SystemMessage(content="Rewrite as standalone search query."), *history, HumanMessage(content=question)]
-    res = safe_api_call(model.invoke, msg)
-    return res.content.strip() if res else question
+    try:
+        return chat_model.invoke(msg).content.strip()
+    except:
+        return question
 
 def generate_answer(docs, history, question):
-    context = ""
-    for i, doc in enumerate(docs):
-        try:
-            meta = json.loads(doc.metadata.get("original_content", "{}"))
-        except:
-            meta = {}
-        context += f"\n[Doc {i+1}]: {meta.get('raw_text', doc.page_content)}\n"
-        for t in meta.get("tables_html", []): context += f"\n{t}\n"
-
+    context = "\n\n".join([f"[Doc {i+1}]: {d.page_content}" for i, d in enumerate(docs)])
     prompt = f"Answer using this context:\n{context}\n\nQuestion: {question}"
     msg = [SystemMessage(content="You are a helpful assistant."), *history, HumanMessage(content=prompt)]
-    res = safe_api_call(model.invoke, msg)
-    return res.content.strip() if res else "Error generating answer."
+    try:
+        return chat_model.invoke(msg).content.strip()
+    except Exception as e:
+        return f"Error: {e}"
 
-# --- UI LAYOUT ---
+# --- MAIN CHAT UI ---
+st.title(" Chat with Your Documents")
 
-st.title(" Multimodal Hybrid RAG")
-st.caption(f"Powered by Groq ({MODEL_NAME}) + Google Embeddings + BM25")
+if "vector_db" not in st.session_state:
+    st.info("Please upload documents and click 'Process' to begin.")
+else:
+    # Initialize Chat History
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    if prompt := st.chat_input("Ask a question about your files..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-if prompt := st.chat_input("Ask about documents (try 'Show me Figure 1')..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        # Prepare History
-        history_lc = []
-        for msg in st.session_state.messages[:-1]:
-            if msg["role"] == "user": history_lc.append(HumanMessage(content=msg["content"]))
-            else: history_lc.append(AIMessage(content=msg["content"]))
-
-        # --- PROCESSING ---
-        with st.status(" Processing...", expanded=True) as status:
-            st.write(" Optimizing query...")
-            search_query = rewrite_query(history_lc[-2:], prompt)
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
             
-            st.write(" Running Hybrid Search...")
-            vector_docs = db.similarity_search(search_query, k=5)
-            bm25_docs = bm25_retriever.invoke(search_query)
-            final_docs = reciprocal_rank_fusion(vector_docs, bm25_docs)
-            
-            st.write(f" Found {len(final_docs)} relevant chunks.")
-            status.update(label=" Answer Ready!", state="complete", expanded=False)
+            # Prepare history
+            history_lc = []
+            for msg in st.session_state.messages[:-1]:
+                if msg["role"] == "user": history_lc.append(HumanMessage(content=msg["content"]))
+                else: history_lc.append(AIMessage(content=msg["content"]))
 
-        # --- GENERATE TEXT ANSWER ---
-        full_response = generate_answer(final_docs, history_lc[-2:], prompt)
-        message_placeholder.markdown(full_response)
-        
-        # --- SMART VISUALS LOGIC ---
-        # 1. Detect Intent: Did the user ask for visual content?
-        visual_keywords = ["image", "figure", "graph", "chart", "table", "diagram", "show me"]
-        user_wants_visuals = any(kw in prompt.lower() for kw in visual_keywords)
-        
-        # 2. Render (Auto-expand if asked, otherwise collapsed)
-        if final_docs:
-            with st.expander(" Retrieved Images & Tables", expanded=user_wants_visuals):
+            # RAG Pipeline
+            with st.status("Thinking...", expanded=False):
+                query = rewrite_query(history_lc[-2:], prompt)
+                
+                # Hybrid Search
+                vector_docs = st.session_state.vector_db.similarity_search(query, k=5)
+                bm25_docs = st.session_state.bm25_retriever.invoke(query)
+                final_docs = reciprocal_rank_fusion(vector_docs, bm25_docs)
+            
+            # Answer
+            response = generate_answer(final_docs, history_lc[-2:], prompt)
+            message_placeholder.markdown(response)
+            
+            # Show Sources
+            with st.expander("View Source Context"):
                 for i, doc in enumerate(final_docs):
-                    try:
-                        meta = json.loads(doc.metadata.get("original_content", "{}"))
-                        
-                        # Tables
-                        for table_html in meta.get("tables_html", []):
-                            st.caption(f"**Table from Document {i+1}**")
-                            st.markdown(table_html, unsafe_allow_html=True)
-                            st.divider()
-                        
-                        # Images
-                        for img_b64 in meta.get("images_base64", []):
-                            st.caption(f"**Figure from Document {i+1}**")
-                            st.image(
-                                base64.b64decode(img_b64), 
-                                use_column_width=True
-                            )
-                            st.divider()
-                    except Exception as e:
-                        st.warning(f"Error rendering media: {e}")
+                    st.caption(f"Source {i+1} (from {doc.metadata.get('source', 'unknown')})")
+                    st.text(doc.page_content[:500] + "...")
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+        st.session_state.messages.append({"role": "assistant", "content": response})

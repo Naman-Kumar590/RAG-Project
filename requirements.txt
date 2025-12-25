@@ -7,3 +7,5 @@ langchain-google-genai
 rank_bm25
 python-dotenv
 chromadb
+pypdf
+Docx2txt
